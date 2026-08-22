@@ -4,15 +4,15 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox,
 )
 
-from ..core.mixture_calculator import MixtureCalculator
 from ..core.mixture_component import MixtureComponent
 
 class MixtureDialog(QDialog):
     """Dialog for defining mixture compositions"""
 
-    def __init__(self, parent=None, predefined_mixtures=None):
+    def __init__(self, parent=None, predefined_mixtures=None, fluids=None):
         super().__init__(parent)
         self.predefined_mixtures = predefined_mixtures or {}
+        self.fluids = fluids
         self.components = []
         self.init_ui()
 
@@ -45,8 +45,10 @@ class MixtureDialog(QDialog):
         # Add component controls
         add_layout = QHBoxLayout()
         self.comp_combo = QComboBox()
-        calc = MixtureCalculator()
-        self.comp_combo.addItems(calc.fluids)
+        if self.fluids is None:
+            from ..core.mixture_calculator import MixtureCalculator
+            self.fluids = MixtureCalculator().fluids
+        self.comp_combo.addItems(self.fluids)
         add_layout.addWidget(QLabel("Component:"))
         add_layout.addWidget(self.comp_combo)
 
@@ -95,14 +97,21 @@ class MixtureDialog(QDialog):
         mixture_name = self.pred_combo.currentText()
         if mixture_name in self.predefined_mixtures:
             self.components.clear()
+            self.comp_table.blockSignals(True)
             self.comp_table.setRowCount(0)
 
-            for comp_name, mole_frac in self.predefined_mixtures[mixture_name]:
-                comp = MixtureComponent(comp_name, mole_frac)
-                self.components.append(comp)
-                self.add_component_to_table(comp)
+            try:
+                for comp_name, mole_frac in self.predefined_mixtures[mixture_name]:
+                    comp = MixtureComponent(comp_name, mole_frac)
+                    self.components.append(comp)
+                    self.add_component_to_table(comp)
+            except ValueError as e:
+                QMessageBox.critical(self, "Invalid Component", str(e))
+            finally:
+                self.comp_table.blockSignals(False)
 
             self.calculate_mass_fractions()
+            self.update_table()
 
     def add_component(self):
         """Add new component to mixture"""
@@ -114,9 +123,15 @@ class MixtureDialog(QDialog):
                 QMessageBox.warning(self, "Warning", "Component already exists!")
                 return
 
-        comp = MixtureComponent(comp_name, 0.0)
+        try:
+            comp = MixtureComponent(comp_name, 0.0)
+        except ValueError as e:
+            QMessageBox.critical(self, "Invalid Component", str(e))
+            return
         self.components.append(comp)
+        self.comp_table.blockSignals(True)
         self.add_component_to_table(comp)
+        self.comp_table.blockSignals(False)
 
     def add_component_to_table(self, component):
         """Add component to table widget"""
@@ -134,14 +149,19 @@ class MixtureDialog(QDialog):
         mass_item = QTableWidgetItem(f"{component.mass_fraction:.4f}")
         self.comp_table.setItem(row, 2, mass_item)
 
-        # Remove button
+        # Remove button — the row is resolved at click time (rows shift after
+        # removals, so a captured index would delete the wrong component)
         remove_btn = QPushButton("Remove")
-        remove_btn.clicked.connect(lambda: self.remove_component(row))
+        remove_btn.clicked.connect(self._remove_clicked)
         self.comp_table.setCellWidget(row, 3, remove_btn)
 
-        # Connect editing signals
-        mole_item.itemChanged = self.update_from_table
-        mass_item.itemChanged = self.update_from_table
+    def _remove_clicked(self):
+        """Remove the component whose row holds the clicked button."""
+        btn = self.sender()
+        for row in range(self.comp_table.rowCount()):
+            if self.comp_table.cellWidget(row, 3) is btn:
+                self.remove_component(row)
+                return
 
     def remove_component(self, row):
         """Remove component from mixture"""
@@ -151,16 +171,27 @@ class MixtureDialog(QDialog):
             self.update_table()
 
     def update_from_table(self):
-        """Update components from table values"""
-        for row in range(self.comp_table.rowCount()):
-            if row < len(self.components):
+        """Update components from table values; invalid entries are reverted."""
+        for row in range(min(self.comp_table.rowCount(), len(self.components))):
+            comp = self.components[row]
+            mole_item = self.comp_table.item(row, 1)
+            mass_item = self.comp_table.item(row, 2)
+            if mole_item is not None:
                 try:
-                    mole_frac = float(self.comp_table.item(row, 1).text())
-                    mass_frac = float(self.comp_table.item(row, 2).text())
-                    self.components[row].mole_fraction = mole_frac
-                    self.components[row].mass_fraction = mass_frac
-                except:
-                    pass
+                    comp.mole_fraction = float(mole_item.text())
+                except ValueError:
+                    self._revert_item(mole_item, comp.mole_fraction)
+            if mass_item is not None:
+                try:
+                    comp.mass_fraction = float(mass_item.text())
+                except ValueError:
+                    self._revert_item(mass_item, comp.mass_fraction)
+
+    def _revert_item(self, item, value):
+        """Restore a table cell to the stored value (visible feedback for bad input)."""
+        self.comp_table.blockSignals(True)
+        item.setText(f"{value:.4f}")
+        self.comp_table.blockSignals(False)
 
     def normalize_mole_fractions(self):
         """Normalize mole fractions to sum to 1"""
@@ -194,7 +225,7 @@ class MixtureDialog(QDialog):
 
         # Calculate mass fractions
         for comp in self.components:
-            comp.mass_fraction = (comp.mole_fraction * comp.molecular_weight) / avg_mw
+            comp.mass_fraction = (comp.mole_fraction * comp.molecular_weight) / (avg_mw * total_moles)
 
     def calculate_mole_fractions(self):
         """Calculate mole fractions from mass fractions"""
@@ -211,9 +242,15 @@ class MixtureDialog(QDialog):
 
     def update_table(self):
         """Update table display"""
+        self.comp_table.blockSignals(True)
         for row, comp in enumerate(self.components):
-            self.comp_table.item(row, 1).setText(f"{comp.mole_fraction:.4f}")
-            self.comp_table.item(row, 2).setText(f"{comp.mass_fraction:.4f}")
+            mole_item = self.comp_table.item(row, 1)
+            mass_item = self.comp_table.item(row, 2)
+            if mole_item is not None:
+                mole_item.setText(f"{comp.mole_fraction:.4f}")
+            if mass_item is not None:
+                mass_item.setText(f"{comp.mass_fraction:.4f}")
+        self.comp_table.blockSignals(False)
 
     def get_mixture(self):
         """Get final mixture as a list of (name, mole_fraction) tuples"""

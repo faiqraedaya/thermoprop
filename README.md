@@ -1,6 +1,6 @@
 # ThermoProp
 
-Thermophysical properties calculator for pure fluids and mixtures, built for risk and safety engineering workflows.
+Thermophysical properties calculator for pure fluids and mixtures.
 
 ## Features
 
@@ -21,7 +21,17 @@ uv sync
 ## Usage
 
 ```bash
+uv run thermoprop
+# or
 uv run python main.py
+```
+
+## Tests
+
+Reference-state and process-path invariant tests (NIST/CoolProp cross-checks):
+
+```bash
+uv run pytest
 ```
 
 ## License

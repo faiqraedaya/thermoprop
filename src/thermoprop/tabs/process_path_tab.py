@@ -1,9 +1,10 @@
 import numpy as np
+import pandas as pd
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QGroupBox,
                              QComboBox, QLabel, QDoubleSpinBox, QPushButton,
                              QTableWidget, QTabWidget, QTextEdit, QSpinBox,
                              QMessageBox, QTableWidgetItem)
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QThread, Signal
 
 from ..core.plot_canvas import PlotCanvas
 
@@ -56,7 +57,18 @@ _PROCESS_FINAL_META = {
     'Isenthalpic': ("Final Pressure",    "bar", True),
     'Isentropic':  ("Final Pressure",    "bar", True),
     'Polytropic':  ("Final Pressure",    "bar", True),
-    'Custom':      ("Final Value",       "—",   None),
+}
+
+# Maps SI result keys → (display header with unit, conversion from SI)
+_DISPLAY_COLUMNS = {
+    'Temperature':     ('Temperature (°C)',     lambda v: v - 273.15),
+    'Pressure':        ('Pressure (bar)',       lambda v: v / 1e5),
+    'Enthalpy':        ('Enthalpy (kJ/kg)',     lambda v: v / 1000),
+    'Entropy':         ('Entropy (kJ/kg·K)',    lambda v: v / 1000),
+    'Density':         ('Density (kg/m³)',      lambda v: v),
+    'Internal Energy': ('Internal Energy (kJ/kg)', lambda v: v / 1000),
+    'Quality':         ('Quality (-)',          lambda v: v),
+    'Phase':           ('Phase',                None),
 }
 
 
@@ -85,7 +97,7 @@ class ProcessPathTab(QWidget):
         # Initial state
         input_layout.addWidget(QLabel("Initial T (°C):"), 1, 0)
         self.init_temp = QDoubleSpinBox()
-        self.init_temp.setRange(-273, 2000)
+        self.init_temp.setRange(-273.14, 2000)
         self.init_temp.setValue(25)
         input_layout.addWidget(self.init_temp, 1, 1)
 
@@ -106,7 +118,7 @@ class ProcessPathTab(QWidget):
         self.final_label = QLabel("Final Temperature (°C):")
         input_layout.addWidget(self.final_label, 2, 2)
         self.final_condition = QDoubleSpinBox()
-        self.final_condition.setRange(-10000, 10000)
+        self.final_condition.setRange(-273.14, 10000)
         self.final_condition.setValue(100)
         input_layout.addWidget(self.final_condition, 2, 3)
 
@@ -166,7 +178,7 @@ class ProcessPathTab(QWidget):
             if self.final_condition.value() <= 0:
                 self.final_condition.setValue(10.0)
         elif is_pressure is False:   # temperature
-            self.final_condition.setRange(-273, 2000)
+            self.final_condition.setRange(-273.14, 2000)
             if self.final_condition.value() <= 0.001:
                 self.final_condition.setValue(100.0)
 
@@ -194,10 +206,8 @@ class ProcessPathTab(QWidget):
         _, _, is_pressure = _PROCESS_FINAL_META.get(process_type, (None, None, None))
         if is_pressure:
             final_value_si = final_value * 1e5          # bar → Pa
-        elif is_pressure is False:
-            final_value_si = final_value + 273.15       # °C → K
         else:
-            final_value_si = final_value                # Custom: pass as-is
+            final_value_si = final_value + 273.15       # °C → K
 
         # Disable button and update status during background calc
         self.proc_calc_btn.setEnabled(False)
@@ -217,7 +227,7 @@ class ProcessPathTab(QWidget):
 
         _, unit, is_pressure = _PROCESS_FINAL_META.get(process_type, ("Final Value", "—", None))
 
-        # ── Summary ──────────────────────────────────────────────────────
+        # ── Summary (values converted to display units) ──────────────────
         summary = (
             f"Process Path Simulation\n"
             f"Fluid: {fluid}\n"
@@ -228,33 +238,37 @@ class ProcessPathTab(QWidget):
         )
         if process_type == 'Polytropic':
             summary += f"Polytropic n: {self.poly_n.value():.3f}\n"
-        summary += f"Points: {self.num_points.value()}\n\n"
+        summary += f"Points: {len(results['Temperature'])}\n\n"
 
-        summary += "First State:\n"
-        for key, arr in results.items():
-            if isinstance(arr, np.ndarray) and arr.size:
-                val = arr[0]
-                summary += f"  {key}: {self._fmt(val)}\n"
-        summary += "\nLast State:\n"
-        for key, arr in results.items():
-            if isinstance(arr, np.ndarray) and arr.size:
-                val = arr[-1]
-                summary += f"  {key}: {self._fmt(val)}\n"
+        for state_label, idx in (("First State:", 0), ("Last State:", -1)):
+            summary += f"{state_label}\n"
+            for key, arr in results.items():
+                if isinstance(arr, np.ndarray) and arr.size:
+                    header, conv = _DISPLAY_COLUMNS.get(key, (key, None))
+                    val = arr[idx]
+                    if conv is not None and isinstance(val, (int, float, np.floating)):
+                        val = conv(float(val))
+                    summary += f"  {header}: {self._fmt(val)}\n"
+            summary += "\n"
         self.process_results.setPlainText(summary)
 
-        # ── Data table ───────────────────────────────────────────────────
+        # ── Data table (display units in headers) ────────────────────────
         props = list(results.keys())
+        headers = [_DISPLAY_COLUMNS.get(key, (key, None))[0] for key in props]
         nrow = len(results[props[0]])
         self.process_table.setRowCount(nrow)
         self.process_table.setColumnCount(len(props))
-        self.process_table.setHorizontalHeaderLabels(props)
+        self.process_table.setHorizontalHeaderLabels(headers)
         for i in range(nrow):
             for j, key in enumerate(props):
                 val = results[key][i]
+                _, conv = _DISPLAY_COLUMNS.get(key, (key, None))
+                if conv is not None and isinstance(val, (int, float, np.floating)):
+                    val = conv(float(val))
                 self.process_table.setItem(i, j, QTableWidgetItem(self._fmt(val)))
         self.process_table.resizeColumnsToContents()
 
-        # ── Plot ─────────────────────────────────────────────────────────
+        # ── Plot (canvas expects SI arrays) ──────────────────────────────
         self.process_plot_canvas.plot_process_path(results, process_type, fluid)
 
     def _on_simulation_error(self, msg: str):
@@ -265,10 +279,67 @@ class ProcessPathTab(QWidget):
     @staticmethod
     def _fmt(val) -> str:
         """Format a single value for display."""
-        if isinstance(val, float):
+        if isinstance(val, (float, np.floating)):
             if np.isnan(val):
                 return "N/A"
             if abs(val) >= 1e8 or (val != 0 and abs(val) < 1e-8):
                 return f"{val:.4e}"
             return f"{val:.6g}"
         return str(val)
+
+    # ── Integration with main window (export / project / clear) ─────────
+
+    def get_results(self):
+        """Return the current data table as a DataFrame, or None if empty."""
+        nrow = self.process_table.rowCount()
+        ncol = self.process_table.columnCount()
+        if nrow == 0 or ncol == 0:
+            return None
+        headers = []
+        for col in range(ncol):
+            item = self.process_table.horizontalHeaderItem(col)
+            headers.append(item.text() if item else f"Column_{col}")
+        rows = []
+        for row in range(nrow):
+            rows.append([
+                self.process_table.item(row, col).text()
+                if self.process_table.item(row, col) else ""
+                for col in range(ncol)
+            ])
+        return pd.DataFrame(rows, columns=headers)
+
+    def clear_data(self):
+        """Clear results, table and plot."""
+        self.process_results.clear()
+        self.process_table.setRowCount(0)
+        self.process_table.setColumnCount(0)
+        self.process_plot_canvas.clear()
+
+    def get_tab_data(self):
+        """Serializable snapshot of the tab's inputs."""
+        return {
+            'fluid': self.proc_fluid_combo.currentText(),
+            'initial_T_C': self.init_temp.value(),
+            'initial_P_bar': self.init_pres.value(),
+            'process': self.process_type.currentText(),
+            'final_value': self.final_condition.value(),
+            'polytropic_n': self.poly_n.value(),
+            'num_points': self.num_points.value(),
+        }
+
+    def load_tab_data(self, data):
+        """Restore the tab's inputs from a snapshot."""
+        if 'fluid' in data:
+            self.proc_fluid_combo.setCurrentText(data['fluid'])
+        if 'process' in data:
+            self.process_type.setCurrentText(data['process'])
+        if 'initial_T_C' in data:
+            self.init_temp.setValue(data['initial_T_C'])
+        if 'initial_P_bar' in data:
+            self.init_pres.setValue(data['initial_P_bar'])
+        if 'final_value' in data:
+            self.final_condition.setValue(data['final_value'])
+        if 'polytropic_n' in data:
+            self.poly_n.setValue(data['polytropic_n'])
+        if 'num_points' in data:
+            self.num_points.setValue(data['num_points'])

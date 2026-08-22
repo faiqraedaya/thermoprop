@@ -2,7 +2,6 @@
 Mixture component implementation for ThermoProp application
 """
 
-from typing import Optional
 from CoolProp.CoolProp import PropsSI
 
 class MixtureComponent:
@@ -13,20 +12,23 @@ class MixtureComponent:
         Initialize a mixture component
 
         Args:
-            name: Name of the fluid component
+            name: Name of the fluid component (must be a valid CoolProp fluid)
             mole_fraction: Mole fraction of the component (0-1)
             mass_fraction: Mass fraction of the component (0-1)
+
+        Raises:
+            ValueError: If the fluid name is not recognized by CoolProp
         """
         self.name = name
         self.mole_fraction = mole_fraction
         self.mass_fraction = mass_fraction
-        self.molecular_weight: Optional[float] = None
 
-        # Get molecular weight if available
         try:
-            self.molecular_weight = PropsSI('M', self.name) * 1000  # g/mol
-        except:
-            self.molecular_weight = 1.0  # Default value
+            self.molecular_weight: float = PropsSI('M', self.name) * 1000  # g/mol
+        except Exception as e:
+            raise ValueError(
+                f"Unknown fluid '{name}': cannot retrieve molar mass from CoolProp ({e})"
+            ) from e
 
     def __str__(self) -> str:
         """String representation of the component"""

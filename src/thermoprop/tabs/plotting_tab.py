@@ -145,3 +145,35 @@ class PlottingTab(QWidget):
             QApplication.clipboard().setImage(img)
         except Exception as e:
             QMessageBox.critical(self, "Copy Error", f"Failed to copy plot: {str(e)}")
+
+    # ── Integration with main window (project / clear) ──────────────────
+
+    def clear_data(self):
+        """Clear the plot."""
+        self.plot_canvas.clear()
+
+    def get_tab_data(self):
+        """Serializable snapshot of the tab's inputs."""
+        return {
+            'fluid': self.plot_fluid_combo.currentText(),
+            'plot_type': self.plot_type_combo.currentText(),
+            'show_grid': self.show_grid.isChecked(),
+            'show_legend': self.show_legend.isChecked(),
+            'x_axis': self.x_axis_combo.currentText(),
+            'y_axis': self.y_axis_combo.currentText(),
+        }
+
+    def load_tab_data(self, data):
+        """Restore the tab's inputs from a snapshot."""
+        if 'fluid' in data:
+            self.plot_fluid_combo.setCurrentText(data['fluid'])
+        if 'plot_type' in data:
+            self.plot_type_combo.setCurrentText(data['plot_type'])
+        if 'show_grid' in data:
+            self.show_grid.setChecked(bool(data['show_grid']))
+        if 'show_legend' in data:
+            self.show_legend.setChecked(bool(data['show_legend']))
+        if 'x_axis' in data:
+            self.x_axis_combo.setCurrentText(data['x_axis'])
+        if 'y_axis' in data:
+            self.y_axis_combo.setCurrentText(data['y_axis'])

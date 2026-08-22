@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
                              QGroupBox, QComboBox, QLabel, QPushButton,
                              QDoubleSpinBox, QTableWidget, QSplitter,
@@ -9,14 +10,13 @@ class MixtureTab(QWidget):
     def __init__(self, calc, parent=None):
         super().__init__(parent)
         self.calc = calc
-        self.parent = parent
+        self._main_window = parent
         self.current_components = []  # Stores List[MixtureComponent]
         self.init_ui()
 
     def init_ui(self):
         """Create mixture calculation tab"""
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
+        layout = QHBoxLayout(self)
 
         # Left panel - Mixture definition
         left_panel = QWidget()
@@ -60,7 +60,7 @@ class MixtureTab(QWidget):
 
         state_layout.addWidget(QLabel("Temperature:"), 0, 0)
         self.mix_temp = QDoubleSpinBox()
-        self.mix_temp.setRange(-273, 2000)
+        self.mix_temp.setRange(-273.14, 2000)
         self.mix_temp.setValue(25)
         self.mix_temp.setSuffix(" °C")
         state_layout.addWidget(self.mix_temp, 0, 1)
@@ -120,8 +120,8 @@ class MixtureTab(QWidget):
 
     def define_mixture(self):
         """Define mixture composition"""
-        if self.parent and hasattr(self.parent, 'open_mixture_designer'):
-            self.parent.open_mixture_designer()
+        if self._main_window and hasattr(self._main_window, 'open_mixture_designer'):
+            self._main_window.open_mixture_designer()
         else:
             QMessageBox.warning(self, "Error",
                 "Could not open mixture designer.")
@@ -137,13 +137,22 @@ class MixtureTab(QWidget):
 
         if ok and mixture_name:
             tuples = self.calc.predefined_mixtures[mixture_name]
-            self._store_and_display(tuples)
-            QMessageBox.information(self, "Mixture Loaded", f"Loaded {mixture_name} mixture")
+            if self._store_and_display(tuples):
+                QMessageBox.information(self, "Mixture Loaded", f"Loaded {mixture_name} mixture")
 
-    def _store_and_display(self, components):
-        """Convert (name, mole_fraction) tuples to MixtureComponent list and display."""
+    def _store_and_display(self, components) -> bool:
+        """Convert (name, mole_fraction) tuples to MixtureComponent list and display.
+
+        Returns True on success; shows an error and keeps the previous mixture
+        if any component name is invalid.
+        """
         from ..core.mixture_component import MixtureComponent
-        self.current_components = [MixtureComponent(name, frac) for name, frac in components]
+        try:
+            new_components = [MixtureComponent(name, frac) for name, frac in components]
+        except ValueError as e:
+            QMessageBox.critical(self, "Invalid Component", str(e))
+            return False
+        self.current_components = new_components
         total = sum(c.mole_fraction for c in self.current_components)
         text = "Mixture Composition:\n"
         for c in self.current_components:
@@ -151,6 +160,7 @@ class MixtureTab(QWidget):
         if abs(total - 1.0) > 1e-4:
             text += f"\n  Warning: mole fractions sum to {total:.4f} (expected 1.0)"
         self.mixture_display.setPlainText(text)
+        return True
 
     def display_mixture(self, components):
         """Display mixture composition (legacy: accepts (name, fraction) tuples)."""
@@ -216,3 +226,43 @@ class MixtureTab(QWidget):
 
         # Resize columns to content
         self.mixture_results_table.resizeColumnsToContents()
+
+    # ── Integration with main window (export / project / clear) ─────────
+
+    def get_results(self):
+        """Return current mixture results as a DataFrame, or None if empty."""
+        rows = []
+        for row in range(self.mixture_results_table.rowCount()):
+            items = [self.mixture_results_table.item(row, col) for col in range(3)]
+            if all(items):
+                rows.append([item.text() for item in items])
+        if not rows:
+            return None
+        return pd.DataFrame(rows, columns=['Property', 'Value', 'Unit'])
+
+    def clear_data(self):
+        """Clear mixture definition and results."""
+        self.current_components = []
+        self.mixture_display.clear()
+        self.mixture_results_table.setRowCount(0)
+        self.component_table.setRowCount(0)
+
+    def get_tab_data(self):
+        """Serializable snapshot of the tab's inputs."""
+        return {
+            'model': self.mixture_model.currentText(),
+            'temperature_C': self.mix_temp.value(),
+            'pressure_bar': self.mix_pres.value(),
+            'components': [(c.name, c.mole_fraction) for c in self.current_components],
+        }
+
+    def load_tab_data(self, data):
+        """Restore the tab's inputs from a snapshot."""
+        if 'model' in data:
+            self.mixture_model.setCurrentText(data['model'])
+        if 'temperature_C' in data:
+            self.mix_temp.setValue(data['temperature_C'])
+        if 'pressure_bar' in data:
+            self.mix_pres.setValue(data['pressure_bar'])
+        if data.get('components'):
+            self._store_and_display(data['components'])

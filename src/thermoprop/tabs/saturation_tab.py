@@ -1,9 +1,17 @@
+import logging
+
+import numpy as np
+import pandas as pd
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QGroupBox,
                              QComboBox, QLabel, QDoubleSpinBox, QPushButton,
-                             QTableWidget, QSplitter, QTableWidgetItem)
+                             QTableWidget, QSplitter, QTableWidgetItem,
+                             QMessageBox)
 from PySide6.QtCore import Qt
+
 from ..core.plot_canvas import PlotCanvas
-import numpy as np
+from ..core.sweeps import saturation_sweep
+
+logger = logging.getLogger(__name__)
 
 class SaturationTab(QWidget):
     def __init__(self, calc, parent=None):
@@ -13,8 +21,7 @@ class SaturationTab(QWidget):
 
     def init_ui(self):
         """Create enhanced saturation properties tab"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        layout = QVBoxLayout(self)
 
         # Input section with multiple options
         input_group = QGroupBox("Saturation Calculation")
@@ -35,7 +42,8 @@ class SaturationTab(QWidget):
 
         # Value and unit
         self.sat_value = QDoubleSpinBox()
-        self.sat_value.setRange(-273, 1000)
+        self.sat_value.setRange(-273.14, 5000)
+        self.sat_value.setDecimals(4)
         self.sat_value.setValue(100)
         input_layout.addWidget(self.sat_value, 2, 2)
 
@@ -77,11 +85,11 @@ class SaturationTab(QWidget):
 
         if sat_type == 'Temperature':
             self.sat_unit.addItems(['°C', 'K', '°F'])
-            self.sat_value.setRange(-273, 1000)
+            self.sat_value.setRange(-273.14, 5000)
             self.sat_value.setValue(100)
         else:  # Pressure
             self.sat_unit.addItems(['bar', 'kPa', 'MPa', 'atm', 'psi'])
-            self.sat_value.setRange(0.001, 1000)
+            self.sat_value.setRange(0.0001, 100000)
             self.sat_value.setValue(1.01325)
 
     def calculate_saturation(self):
@@ -111,8 +119,8 @@ class SaturationTab(QWidget):
             self.update_saturation_plot(fluid, sat_type_char, sat_value, sat_unit)
 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Calculation Error", f"Failed to calculate saturation properties: {str(e)}")
+            QMessageBox.critical(self, "Calculation Error",
+                                 f"Failed to calculate saturation properties: {str(e)}")
 
     def display_saturation_results(self, results):
         """Display saturation calculation results"""
@@ -123,7 +131,9 @@ class SaturationTab(QWidget):
             self.sat_results_table.setItem(i, 0, QTableWidgetItem(property_name))
 
             # Value (formatted)
-            if isinstance(value, float) and (abs(value) < 1e-6 or abs(value) > 1e6):
+            if isinstance(value, float) and np.isnan(value):
+                formatted_value = "N/A"
+            elif isinstance(value, float) and (abs(value) < 1e-6 or abs(value) > 1e6):
                 formatted_value = f"{value:.4e}"
             elif isinstance(value, float):
                 formatted_value = f"{value:.6g}"
@@ -138,69 +148,75 @@ class SaturationTab(QWidget):
         self.sat_results_table.resizeColumnsToContents()
 
     def update_saturation_plot(self, fluid, sat_type, sat_value, sat_unit):
-        """Update saturation curve plot"""
+        """Update saturation curve plot around the requested state"""
         try:
-            self.sat_plot_canvas.axes.clear()
-            import CoolProp.CoolProp as CP
-            import CoolProp
-            # Generate saturation curve data
+            # Center the plotted window on the requested saturation point
             if sat_type == 'T':
-                # Temperature-based saturation curve
-                # Convert input to SI (K)
                 T_center = self.calc._convert_to_si(sat_value, sat_unit, 'T')
-                # Get fluid critical and triple point
-                try:
-                    Tc = CP.PropsSI('Tcrit', fluid)
-                except Exception:
-                    Tc = T_center * 1.5
-                try:
-                    Ttriple = CP.PropsSI('Ttriple', fluid)
-                except Exception:
-                    Ttriple = 273.16
-                T_min = max(Ttriple, T_center * 0.8)
-                T_max = min(Tc * 0.99, T_center * 1.2)
-                T_range = np.linspace(T_min, T_max, 50)
-                P_sat = []
-                for T in T_range:
-                    try:
-                        P = CP.PropsSI('P', 'T', T, 'Q', 0, fluid)
-                        P_sat.append(P)
-                    except Exception:
-                        P_sat.append(np.nan)
-                self.sat_plot_canvas.axes.semilogy(T_range, P_sat, 'b-', label=f'{fluid} Saturation')
-                self.sat_plot_canvas.axes.set_xlabel('Temperature (K)')
-                self.sat_plot_canvas.axes.set_ylabel('Saturation Pressure (Pa)')
-                self.sat_plot_canvas.axes.set_title(f'{fluid} Saturation Curve (P vs T)')
             else:
-                # Pressure-based saturation curve
-                # Convert input to SI (Pa)
                 P_center = self.calc._convert_to_si(sat_value, sat_unit, 'P')
-                # Get fluid critical and triple point
-                try:
-                    Pc = CP.PropsSI('Pcrit', fluid)
-                except Exception:
-                    Pc = P_center * 1.5
-                try:
-                    Ptriple = CP.PropsSI('Ptriple', fluid)
-                except Exception:
-                    Ptriple = 611.657
-                P_min = max(Ptriple, P_center * 0.8)
-                P_max = min(Pc * 0.99, P_center * 1.2)
-                P_range = np.linspace(P_min, P_max, 50)
-                T_sat = []
-                for P in P_range:
-                    try:
-                        T = CP.PropsSI('T', 'P', P, 'Q', 0, fluid)
-                        T_sat.append(T)
-                    except Exception:
-                        T_sat.append(np.nan)
-                self.sat_plot_canvas.axes.plot(P_range, T_sat, 'r-', label=f'{fluid} Saturation')
-                self.sat_plot_canvas.axes.set_xlabel('Saturation Pressure (Pa)')
-                self.sat_plot_canvas.axes.set_ylabel('Temperature (K)')
-                self.sat_plot_canvas.axes.set_title(f'{fluid} Saturation Curve (T vs P)')
-            self.sat_plot_canvas.axes.legend()
-            self.sat_plot_canvas.axes.grid(True)
+                from CoolProp.CoolProp import PropsSI
+                T_center = PropsSI('T', 'P', P_center, 'Q', 0, fluid)
+
+            sat = saturation_sweep(fluid, 50,
+                                   t_min=T_center * 0.8, t_max=T_center * 1.2)
+
+            fig = self.sat_plot_canvas.fig
+            fig.clear()
+            ax = fig.add_subplot(111)
+            self.sat_plot_canvas.axes = ax
+
+            if sat_type == 'T':
+                ax.semilogy(sat['T'], sat['P'], 'b-', label=f'{fluid} Saturation')
+                ax.set_xlabel('Temperature (K)')
+                ax.set_ylabel('Saturation Pressure (Pa)')
+                ax.set_title(f'{fluid} Saturation Curve (P vs T)')
+            else:
+                ax.plot(sat['P'], sat['T'], 'r-', label=f'{fluid} Saturation')
+                ax.set_xlabel('Saturation Pressure (Pa)')
+                ax.set_ylabel('Temperature (K)')
+                ax.set_title(f'{fluid} Saturation Curve (T vs P)')
+            ax.legend()
+            ax.grid(True)
             self.sat_plot_canvas.draw()
         except Exception as e:
-            print(f"Warning: Failed to update saturation plot: {str(e)}")
+            logger.warning("Failed to update saturation plot: %s", e)
             # Continue without plot update
+
+    # ── Integration with main window (export / project / clear) ─────────
+
+    def get_results(self):
+        """Return current saturation results as a DataFrame, or None if empty."""
+        rows = []
+        for row in range(self.sat_results_table.rowCount()):
+            items = [self.sat_results_table.item(row, col) for col in range(3)]
+            if all(items):
+                rows.append([item.text() for item in items])
+        if not rows:
+            return None
+        return pd.DataFrame(rows, columns=['Property', 'Value', 'Unit'])
+
+    def clear_data(self):
+        """Clear results and plot."""
+        self.sat_results_table.setRowCount(0)
+        self.sat_plot_canvas.clear()
+
+    def get_tab_data(self):
+        """Serializable snapshot of the tab's inputs."""
+        return {
+            'fluid': self.sat_fluid_combo.currentText(),
+            'given': self.sat_type_combo.currentText(),
+            'value': self.sat_value.value(),
+            'unit': self.sat_unit.currentText(),
+        }
+
+    def load_tab_data(self, data):
+        """Restore the tab's inputs from a snapshot."""
+        if 'fluid' in data:
+            self.sat_fluid_combo.setCurrentText(data['fluid'])
+        if 'given' in data:
+            self.sat_type_combo.setCurrentText(data['given'])
+        if 'unit' in data:
+            self.sat_unit.setCurrentText(data['unit'])
+        if 'value' in data:
+            self.sat_value.setValue(data['value'])

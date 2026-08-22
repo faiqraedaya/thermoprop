@@ -1,9 +1,43 @@
+import math
+
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
                              QGroupBox, QLineEdit, QComboBox, QLabel,
                              QDoubleSpinBox, QPushButton, QTableWidget,
-                             QSplitter, QHeaderView, QTableWidgetItem)
+                             QSplitter, QTableWidgetItem, QMessageBox,
+                             QFileDialog, QApplication)
 from PySide6.QtCore import Qt
 import pandas as pd
+
+# Per-(property, unit) spinbox limits: (min, max, decimals)
+_UNIT_RANGES = {
+    ('T', '°C'): (-273.14, 5000.0, 3),
+    ('T', 'K'): (0.001, 5273.15, 3),
+    ('T', '°F'): (-459.66, 9000.0, 3),
+    ('P', 'Pa'): (0.1, 1e10, 1),
+    ('P', 'kPa'): (0.0001, 1e7, 4),
+    ('P', 'MPa'): (1e-6, 1e4, 6),
+    ('P', 'bar'): (1e-6, 1e5, 6),
+    ('P', 'bara'): (1e-6, 1e5, 6),
+    ('P', 'barg'): (-1.0132, 1e5, 6),
+    ('P', 'psi'): (0.0001, 1.5e6, 4),
+    ('P', 'psia'): (0.0001, 1.5e6, 4),
+    ('P', 'psig'): (-14.695, 1.5e6, 4),
+    ('P', 'atm'): (1e-6, 1e5, 6),
+    ('H', 'J/kg'): (-1e8, 1e8, 1),
+    ('H', 'kJ/kg'): (-1e5, 1e5, 4),
+    ('H', 'MJ/kg'): (-100.0, 100.0, 6),
+    ('H', 'BTU/lb'): (-50000.0, 50000.0, 4),
+    ('U', 'J/kg'): (-1e8, 1e8, 1),
+    ('U', 'kJ/kg'): (-1e5, 1e5, 4),
+    ('U', 'MJ/kg'): (-100.0, 100.0, 6),
+    ('U', 'BTU/lb'): (-50000.0, 50000.0, 4),
+    ('D', 'kg/m³'): (0.0001, 1e5, 4),
+    ('D', 'g/cm³'): (1e-6, 100.0, 6),
+    ('D', 'lb/ft³'): (0.0001, 7000.0, 4),
+    ('D', 'kg/L'): (1e-6, 100.0, 6),
+    ('S', 'J/kg/K'): (-1e6, 1e6, 2),
+    ('S', 'kJ/kg/K'): (-1000.0, 1000.0, 5),
+}
 
 class SinglePointTab(QWidget):
     def __init__(self, calc, parent=None):
@@ -13,8 +47,7 @@ class SinglePointTab(QWidget):
 
     def init_ui(self):
         """Create enhanced single point calculation tab"""
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
+        layout = QHBoxLayout(self)
 
         # Left panel - Input
         left_panel = QWidget()
@@ -75,9 +108,14 @@ class SinglePointTab(QWidget):
         self.prop2_unit.addItems(['bara', 'barg', 'Pa', 'psia', 'psig', 'MPa'])
         input_layout.addWidget(self.prop2_unit, 1, 3)
 
-        # Update unit combos when property type changes
+        # Update unit combos when property type changes, and value ranges when
+        # the unit changes
         self.prop1_combo.currentTextChanged.connect(self.update_units)
         self.prop2_combo.currentTextChanged.connect(self.update_units)
+        self.prop1_unit.currentTextChanged.connect(
+            lambda _: self._apply_range(self.prop1_combo, self.prop1_unit, self.prop1_value))
+        self.prop2_unit.currentTextChanged.connect(
+            lambda _: self._apply_range(self.prop2_combo, self.prop2_unit, self.prop2_value))
 
         # Initialize units
         self.update_units(is_init=True)
@@ -162,21 +200,22 @@ class SinglePointTab(QWidget):
 
         if is_init:
             # Initial setup for both
-            self._update_combo(self.prop1_combo, self.prop1_unit)
-            self._update_combo(self.prop2_combo, self.prop2_unit)
+            self._update_combo(self.prop1_combo, self.prop1_unit, self.prop1_value)
+            self._update_combo(self.prop2_combo, self.prop2_unit, self.prop2_value)
         else:
             sender = self.sender()
             if sender == self.prop1_combo:
-                self._update_combo(self.prop1_combo, self.prop1_unit)
+                self._update_combo(self.prop1_combo, self.prop1_unit, self.prop1_value)
             elif sender == self.prop2_combo:
-                self._update_combo(self.prop2_combo, self.prop2_unit)
+                self._update_combo(self.prop2_combo, self.prop2_unit, self.prop2_value)
 
-    def _update_combo(self, prop_combo, unit_combo):
-        """Helper to update a single unit combo box"""
+    def _update_combo(self, prop_combo, unit_combo, value_spin):
+        """Helper to update a single unit combo box and the value range"""
         prop = prop_combo.currentText()
         units = self.prop_to_unit_map.get(prop, [])
 
         current_unit = unit_combo.currentText()
+        unit_combo.blockSignals(True)
         unit_combo.clear()
         if units:
             unit_combo.addItems(units)
@@ -184,6 +223,19 @@ class SinglePointTab(QWidget):
                 unit_combo.setCurrentText(current_unit)
             else:
                 unit_combo.setCurrentIndex(0)
+        unit_combo.blockSignals(False)
+        self._apply_range(prop_combo, unit_combo, value_spin)
+
+    @staticmethod
+    def _apply_range(prop_combo, unit_combo, value_spin):
+        """Set spinbox limits appropriate for the selected property + unit."""
+        prop = prop_combo.currentText()
+        unit = unit_combo.currentText()
+        if not unit:
+            return
+        lo, hi, decimals = _UNIT_RANGES.get((prop, unit), (-1e10, 1e10, 6))
+        value_spin.setDecimals(decimals)
+        value_spin.setRange(lo, hi)
 
     def calculate_single_point(self):
         """Calculate properties for single point"""
@@ -199,11 +251,11 @@ class SinglePointTab(QWidget):
 
             # Validate inputs
             if prop1 == prop2:
-                from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Input Error", "Property 1 and Property 2 must be different.")
                 return
 
-            # Perform calculation
+            # Perform calculation (unsupported input pairs raise a clear
+            # ValueError from the calculator)
             results = self.calc.calculate_single_point_properties(
                 fluid, prop1, prop1_value, prop1_unit, prop2, prop2_value, prop2_unit
             )
@@ -212,11 +264,11 @@ class SinglePointTab(QWidget):
             self.display_results(results)
 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate properties: {str(e)}")
 
     def display_results(self, results):
         """Display calculation results in the table"""
+        self.results_table.setSortingEnabled(False)
         self.results_table.setRowCount(len(results))
 
         for i, (property_name, (value, unit)) in enumerate(results.items()):
@@ -224,7 +276,6 @@ class SinglePointTab(QWidget):
             self.results_table.setItem(i, 0, QTableWidgetItem(property_name))
 
             # Value (formatted)
-            import math
             if isinstance(value, float) and math.isnan(value):
                 val_str = "N/A"
             elif isinstance(value, float) and (abs(value) < 1e-6 or abs(value) > 1e6):
@@ -239,102 +290,112 @@ class SinglePointTab(QWidget):
             # Unit
             self.results_table.setItem(i, 2, QTableWidgetItem(unit))
 
+        self.results_table.setSortingEnabled(True)
         # Resize columns to content
         self.results_table.resizeColumnsToContents()
+
+    def _table_rows(self):
+        """Current results table contents as a list of [property, value, unit]."""
+        data = []
+        for row in range(self.results_table.rowCount()):
+            property_item = self.results_table.item(row, 0)
+            value_item = self.results_table.item(row, 1)
+            unit_item = self.results_table.item(row, 2)
+            if property_item and value_item and unit_item:
+                data.append([property_item.text(), value_item.text(), unit_item.text()])
+        return data
+
+    # ── Integration with main window (export / project / clear) ─────────
+
+    def get_results(self):
+        """Return current results as a DataFrame, or None if empty."""
+        data = self._table_rows()
+        if not data:
+            return None
+        return pd.DataFrame(data, columns=['Property', 'Value', 'Unit'])
+
+    def clear_data(self):
+        """Clear results."""
+        self.results_table.setRowCount(0)
+
+    def get_tab_data(self):
+        """Serializable snapshot of the tab's inputs."""
+        return {
+            'fluid': self.fluid_combo.currentText(),
+            'prop1': self.prop1_combo.currentText(),
+            'prop1_value': self.prop1_value.value(),
+            'prop1_unit': self.prop1_unit.currentText(),
+            'prop2': self.prop2_combo.currentText(),
+            'prop2_value': self.prop2_value.value(),
+            'prop2_unit': self.prop2_unit.currentText(),
+        }
+
+    def load_tab_data(self, data):
+        """Restore the tab's inputs from a snapshot."""
+        if 'fluid' in data:
+            self.fluid_combo.setCurrentText(data['fluid'])
+        if 'prop1' in data:
+            self.prop1_combo.setCurrentText(data['prop1'])
+        if 'prop1_unit' in data:
+            self.prop1_unit.setCurrentText(data['prop1_unit'])
+        if 'prop1_value' in data:
+            self.prop1_value.setValue(data['prop1_value'])
+        if 'prop2' in data:
+            self.prop2_combo.setCurrentText(data['prop2'])
+        if 'prop2_unit' in data:
+            self.prop2_unit.setCurrentText(data['prop2_unit'])
+        if 'prop2_value' in data:
+            self.prop2_value.setValue(data['prop2_value'])
+
+    # ── Export helpers ───────────────────────────────────────────────────
 
     def export_results(self):
         """Export results to CSV"""
         try:
-            from PySide6.QtWidgets import QFileDialog
             filename, _ = QFileDialog.getSaveFileName(
                 self, "Export Results", "", "CSV Files (*.csv)"
             )
             if filename:
-                import pandas as pd
-
-                # Get data from table
-                data = []
-                for row in range(self.results_table.rowCount()):
-                    property_item = self.results_table.item(row, 0)
-                    value_item = self.results_table.item(row, 1)
-                    unit_item = self.results_table.item(row, 2)
-
-                    if property_item and value_item and unit_item:
-                        property_name = property_item.text()
-                        value = value_item.text()
-                        unit = unit_item.text()
-                        data.append([property_name, value, unit])
-
+                data = self._table_rows()
                 if data:
                     df = pd.DataFrame(data, columns=['Property', 'Value', 'Unit'])
                     df.to_csv(filename, index=False)
-
-                    from PySide6.QtWidgets import QMessageBox
                     QMessageBox.information(self, "Export Success", f"Results exported to {filename}")
+                else:
+                    QMessageBox.information(self, "Nothing to Export", "Calculate properties first.")
 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(e)}")
 
     def export_excel(self):
         """Export results to Excel"""
         try:
-            from PySide6.QtWidgets import QFileDialog
             filename, _ = QFileDialog.getSaveFileName(
                 self, "Export Results", "", "Excel Files (*.xlsx)"
             )
             if filename:
-                import pandas as pd
-
-                # Get data from table
-                data = []
-                for row in range(self.results_table.rowCount()):
-                    property_item = self.results_table.item(row, 0)
-                    value_item = self.results_table.item(row, 1)
-                    unit_item = self.results_table.item(row, 2)
-
-                    if property_item and value_item and unit_item:
-                        property_name = property_item.text()
-                        value = value_item.text()
-                        unit = unit_item.text()
-                        data.append([property_name, value, unit])
-
+                data = self._table_rows()
                 if data:
                     df = pd.DataFrame(data, columns=['Property', 'Value', 'Unit'])
                     df.to_excel(filename, index=False)
-
-                    from PySide6.QtWidgets import QMessageBox
                     QMessageBox.information(self, "Export Success", f"Results exported to {filename}")
+                else:
+                    QMessageBox.information(self, "Nothing to Export", "Calculate properties first.")
 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(e)}")
 
     def copy_results(self):
         """Copy results to clipboard"""
         try:
-            from PySide6.QtWidgets import QApplication
-
-            # Build text representation
             text = "Property\tValue\tUnit\n"
-            for row in range(self.results_table.rowCount()):
-                property_item = self.results_table.item(row, 0)
-                value_item = self.results_table.item(row, 1)
-                unit_item = self.results_table.item(row, 2)
+            for property_name, value, unit in self._table_rows():
+                text += f"{property_name}\t{value}\t{unit}\n"
 
-                if property_item and value_item and unit_item:
-                    property_name = property_item.text()
-                    value = value_item.text()
-                    unit = unit_item.text()
-                    text += f"{property_name}\t{value}\t{unit}\n"
-
-            # Copy to clipboard
             clipboard = QApplication.clipboard()
             clipboard.setText(text)
 
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Copy Success", "Results copied to clipboard")
 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Copy Error", f"Failed to copy results: {str(e)}")

@@ -2,9 +2,12 @@
 THERMOPROP
 Thermophysical Properties Calculator
 
-Version: 2.3.0
+Version: 2.4.0
 Author: Faiq Raedaya
-Date: 2026-05-20
+
+Launcher for running from a source checkout (``python main.py``).
+The application itself lives in the ``thermoprop`` package under ``src/``;
+see src/thermoprop/app.py.
 
 Changelog:
 - 1.0.0 - 2025-05-03
@@ -19,24 +22,25 @@ Changelog:
     - Migrated to PySide6
     - Removed custom style
     - Removed quick calc dialog and help/about
+- 2.4.0 - 2026-07-08
+    - Correctness overhaul after codebase audit: Gibbs-Dalton ideal-gas
+      mixing at partial pressures with dew-point guard, Wilke/Mason-Saxena
+      transport mixing, consistent humid-air basis (Hha/Sha), real-fluid
+      polytropic paths (p·v^n = const), two-phase segments on isobaric and
+      isothermal paths, fluid-specific diagram temperature ranges,
+      corrected phase-envelope regions, working unit converter for offset
+      units, working export/project persistence, and a pytest suite with
+      reference-state checks
 """
 
-import sys
 import os
+import sys
 
-from PySide6.QtWidgets import QApplication
-from src.thermoprop.main_window import MainWindow
+_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
+if os.path.isdir(_SRC) and _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
 
-def main():
-    """Main application entry point"""
-    app = QApplication(sys.argv)
-    app.setApplicationName("ThermoProp")
-    app.setApplicationVersion("2.3.0")
-
-    window = MainWindow()
-    window.show()
-
-    sys.exit(app.exec())
+from thermoprop.app import main
 
 if __name__ == '__main__':
     main()

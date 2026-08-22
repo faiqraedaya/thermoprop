@@ -2,24 +2,22 @@
 Main window implementation for ThermoProp application
 """
 
-import sys
 import json
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QMessageBox,
-    QProgressBar, QApplication, QFileDialog
+    QProgressBar, QFileDialog
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import QSettings
 
 from .core.mixture_calculator import MixtureCalculator
-from .core.plot_canvas import PlotCanvas
 from .dialogs.mixture_dialog import MixtureDialog
 from .dialogs.unit_converter_dialog import UnitConverterDialog
 from .utils.file_io import FileIO
 from .tabs.tab_manager import TabManager
 
 class MainWindow(QMainWindow):
-    """Enhanced main application window with mixture support"""
+    """Main application window with mixture support"""
 
     def __init__(self):
         super().__init__()
@@ -51,8 +49,6 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress_bar)
-
-
 
     def create_menu_bar(self):
         """Create application menu bar"""
@@ -131,41 +127,38 @@ class MainWindow(QMainWindow):
     def export_all_results(self):
         """Export all calculation results"""
         try:
+            results = self.get_all_results()
+            if not results:
+                QMessageBox.information(
+                    self, "Nothing to Export",
+                    "No calculation results yet. Run a calculation first.")
+                return
             filename, _ = QFileDialog.getSaveFileName(
                 self, "Export Results", "", "Excel Files (*.xlsx)"
             )
             if filename:
-                FileIO.export_results(filename, self.get_all_results())
-                self.statusBar().showMessage(f'Results exported: {filename}')
+                if FileIO.export_results(filename, results):
+                    self.statusBar().showMessage(f'Results exported: {filename}')
+                else:
+                    QMessageBox.critical(
+                        self, "Export Error",
+                        f"Failed to export results to {filename}. "
+                        f"See the log for details.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export results: {str(e)}")
-
-    def quick_calculation(self):
-        """Open quick calculation dialog"""
-        dialog = QuickCalcDialog(self)
-        dialog.exec_()
 
     def open_unit_converter(self):
         """Open unit converter dialog"""
         dialog = UnitConverterDialog(self)
-        dialog.exec_()
+        dialog.exec()
 
     def open_mixture_designer(self):
         """Open mixture designer dialog"""
-        dialog = MixtureDialog(self, predefined_mixtures=self.calc.predefined_mixtures)
-        if dialog.exec_():
+        dialog = MixtureDialog(self, predefined_mixtures=self.calc.predefined_mixtures,
+                               fluids=self.calc.fluids)
+        if dialog.exec():
             self.current_mixture = dialog.get_mixture()
             self.update_mixture_display()
-
-    def show_about(self):
-        """Show about dialog"""
-        QMessageBox.about(self, "About ThermoProp",
-            "ThermoProp v2.2.0\n\n"
-            "Enhanced Thermophysical Properties Calculator\n"
-            "For Risk and Safety Engineering Applications\n"
-            "with Mixture Support\n\n"
-            "Author: Faiq Raedaya\n"
-            "© 2025 MES")
 
     def save_settings(self):
         """Save application settings"""
@@ -195,7 +188,7 @@ class MainWindow(QMainWindow):
                 self.update_mixture_display()
 
             # Load tab data if present
-            if 'tabs' in data and hasattr(self.tab_manager, 'load_tab_data'):
+            if 'tabs' in data:
                 self.tab_manager.load_tab_data(data['tabs'])
 
         except Exception as e:
@@ -209,9 +202,7 @@ class MainWindow(QMainWindow):
         if self.current_mixture:
             data['mixture'] = self.current_mixture
 
-        # Save tab data if available
-        if hasattr(self.tab_manager, 'get_tab_data'):
-            data['tabs'] = self.tab_manager.get_tab_data()
+        data['tabs'] = self.tab_manager.get_tab_data()
 
         return data
 
@@ -224,9 +215,9 @@ class MainWindow(QMainWindow):
             if hasattr(tab, 'get_results'):
                 try:
                     tab_results = tab.get_results()
-                    if tab_results:
+                    if tab_results is not None:
                         results[tab_name] = tab_results
-                except:
+                except Exception:
                     pass
 
         return results

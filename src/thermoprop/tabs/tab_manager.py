@@ -50,3 +50,18 @@ class TabManager:
         for tab in self.tabs.values():
             if hasattr(tab, 'clear_data'):
                 tab.clear_data()
+
+    def get_tab_data(self):
+        """Collect serializable input snapshots from all tabs"""
+        data = {}
+        for name, tab in self.tabs.items():
+            if hasattr(tab, 'get_tab_data'):
+                data[name] = tab.get_tab_data()
+        return data
+
+    def load_tab_data(self, data):
+        """Restore tab input snapshots"""
+        for name, tab_data in (data or {}).items():
+            tab = self.tabs.get(name)
+            if tab is not None and hasattr(tab, 'load_tab_data'):
+                tab.load_tab_data(tab_data)

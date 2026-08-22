@@ -60,6 +60,11 @@ class UnitConverterDialog(QDialog):
         self.to_unit.currentTextChanged.connect(self.convert)
         conv_layout.addWidget(self.to_unit, 1, 2)
 
+        # Conversion status/error display
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #b00020;")
+        conv_layout.addWidget(self.status_label, 2, 0, 1, 3)
+
         layout.addWidget(conv_group)
 
         # Common conversions table
@@ -94,7 +99,7 @@ class UnitConverterDialog(QDialog):
             'Length': ['m', 'cm', 'mm', 'km', 'in', 'ft', 'yd', 'mile'],
             'Area': ['m²', 'cm²', 'mm²', 'km²', 'in²', 'ft²', 'acre'],
             'Volume': ['m³', 'L', 'mL', 'cm³', 'in³', 'ft³', 'gal', 'qt'],
-            'Mass': ['kg', 'g', 'mg', 'lb', 'oz', 'ton'],
+            'Mass': ['kg', 'g', 'mg', 'lb', 'oz', 'tonne'],
             'Force': ['N', 'kN', 'lbf', 'kgf', 'dyne']
         }
 
@@ -110,20 +115,25 @@ class UnitConverterDialog(QDialog):
 
     def convert(self):
         """Perform unit conversion"""
-        try:
-            value = self.from_value.value()
-            from_unit = self.from_unit.currentText()
-            to_unit = self.to_unit.currentText()
-            prop_type = self.prop_type.currentText()
+        value = self.from_value.value()
+        from_unit = self.from_unit.currentText()
+        to_unit = self.to_unit.currentText()
+        if not from_unit or not to_unit:
+            return
 
-            # Use pint for conversion
-            quantity = value * ureg(from_unit)
+        try:
+            # Quantity() (not multiplication) is required for offset units
+            # such as °C/°F, which pint refuses to multiply by a scalar.
+            quantity = ureg.Quantity(value, from_unit)
             converted = quantity.to(to_unit)
 
             self.to_value.setValue(converted.magnitude)
+            self.status_label.setText("")
 
         except Exception as e:
-            self.to_value.setValue(0)
+            self.to_value.clear()
+            self.status_label.setText(
+                f"Cannot convert {from_unit} → {to_unit}: {e}")
 
     def update_conversion_table(self, prop_type):
         """Update common conversions table"""
