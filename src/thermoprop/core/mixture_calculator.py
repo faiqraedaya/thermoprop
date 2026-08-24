@@ -258,6 +258,64 @@ class MixtureCalculator:
 
         return results, None
 
+    def component_properties(
+        self,
+        components: List[MixtureComponent],
+        T: float,
+        P: float
+    ) -> List[Dict[str, object]]:
+        """Per-component properties at the mixture's state, for comparison.
+
+        Each component is evaluated at its own partial pressure x_i*P, the
+        same basis the ideal-gas mixing rules use, so the per-component rows
+        and the mixture row are directly comparable. A component whose
+        properties cannot be evaluated is reported with NaN values and its
+        phase set to the reason, rather than failing the whole table.
+
+        Args:
+            components: List of mixture components
+            T: Temperature in K
+            P: Mixture pressure in Pa
+
+        Returns:
+            One dict per component with mole fraction, mass fraction, molar
+            mass, partial pressure, phase, density, Cp, viscosity and thermal
+            conductivity. Empty if no component has a positive mole fraction.
+        """
+        active = [c for c in components if c.mole_fraction > 0]
+        total_moles = sum(c.mole_fraction for c in active)
+        if total_moles <= 0:
+            return []
+
+        x = [c.mole_fraction / total_moles for c in active]
+        M = [c.molecular_weight for c in active]          # g/mol
+        M_mix = sum(xi * Mi for xi, Mi in zip(x, M))
+
+        rows: List[Dict[str, object]] = []
+        for comp, xi, Mi in zip(active, x, M):
+            P_partial = xi * P
+            row: Dict[str, object] = {
+                'name': comp.name,
+                'mole_fraction': xi,
+                'mass_fraction': xi * Mi / M_mix if M_mix else float('nan'),
+                'molar_mass': Mi,
+                'partial_pressure': P_partial,
+            }
+            try:
+                row['phase'] = PhaseSI('T', T, 'P', P_partial, comp.name)
+            except Exception:
+                row['phase'] = 'not available'
+
+            for key, prop in (('density', 'D'), ('cp', 'Cpmass'),
+                              ('viscosity', 'V'), ('conductivity', 'L')):
+                try:
+                    row[key] = PropsSI(prop, 'T', T, 'P', P_partial, comp.name)
+                except Exception:
+                    row[key] = float('nan')
+            rows.append(row)
+
+        return rows
+
     @staticmethod
     def _wilke_phi(x, mu, M):
         """Wilke interaction parameters φ_ij from viscosities and molar masses."""

@@ -90,7 +90,6 @@ EXCLUDES = [
     'PySide6.QtSpatialAudio',
     'PySide6.QtSql',
     'PySide6.QtStateMachine',
-    'PySide6.QtSvg',
     'PySide6.QtSvgWidgets',
     'PySide6.QtTest',
     'PySide6.QtTextToSpeech',
@@ -110,6 +109,7 @@ EXCLUDES = [
 HIDDEN = [
     'CoolProp.CoolProp',
     'CoolProp.HumidAirProp',
+    'PySide6.QtSvg',          # the icon set is rendered from SVG at runtime
 ]
 HIDDEN += collect_submodules('pint')
 
@@ -118,7 +118,7 @@ a = Analysis(
     ['main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=[('src/thermoprop/gui/fonts', 'thermoprop/gui/fonts')],
     hiddenimports=HIDDEN,
     hookspath=[],
     hooksconfig={},
@@ -165,6 +165,7 @@ coll = COLLECT(
         'Qt6Gui.dll',
         'Qt6Widgets.dll',
         'Qt6Network.dll',
+        'Qt6Svg.dll',
         'Qt6Pdf.dll',
         'qwindows.dll',
     ],

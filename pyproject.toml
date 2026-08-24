@@ -1,6 +1,6 @@
 [project]
 name = "ThermoProp"
-version = "2.4.0"
+version = "2.6.0"
 requires-python = ">=3.13"
 dependencies = [
     "coolprop>=7.2.0",

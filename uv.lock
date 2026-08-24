@@ -709,7 +709,7 @@ wheels = [
 
 [[package]]
 name = "thermoprop"
-version = "2.4.0"
+version = "2.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "coolprop" },

@@ -2,7 +2,7 @@
 THERMOPROP
 Thermophysical Properties Calculator
 
-Version: 2.4.0
+Version: 2.6.0
 Author: Faiq Raedaya
 
 Launcher for running from a source checkout (``python main.py``).
@@ -31,6 +31,24 @@ Changelog:
       corrected phase-envelope regions, working unit converter for offset
       units, working export/project persistence, and a pytest suite with
       reference-state checks
+- 2.5.0 - 2026-08-24
+    - User-interface overhaul against the shared PySide6 design system:
+      ui/theme.py is now the sole styling authority (one stylesheet, one
+      token set, verified contrast ladder), ui/layout.py puts every layout
+      on the 8 px grid, calculations run off the GUI thread behind a shared
+      busy state, every table and plot has an empty state, validation and
+      calculation errors report inline instead of in a modal, matplotlib
+      chrome is neutral with a validated categorical series palette, and
+      the per-component comparison table on the Mixture tab is populated
+      rather than permanently blank
+- 2.6.0 - 2026-08-24
+    - Vertical navigation sidebar (resizable, hideable with Ctrl+B) with a
+      hand-authored 16 px Lucide-geometry icon set, replacing the horizontal
+      tab bar; each page names itself in a title at the top; Inter now ships
+      with the app in gui/fonts instead of being assumed present on the
+      host; modules reorganised into src/thermoprop/core (calculation) and
+      src/thermoprop/gui (interface), and the unused table_utils module was
+      removed
 """
 
 import os

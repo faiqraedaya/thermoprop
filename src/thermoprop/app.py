@@ -10,9 +10,10 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from .main_window import MainWindow
+from .gui.main_window import MainWindow
+from .gui.theme import apply_mpl_theme, apply_theme
 
-__version__ = "2.4.0"
+__version__ = "2.6.0"
 
 
 def main():
@@ -25,6 +26,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("ThermoProp")
     app.setApplicationVersion(__version__)
+
+    # theme.py is the sole styling authority; nothing else sets a stylesheet.
+    apply_theme(app)
+    apply_mpl_theme()
 
     window = MainWindow()
     window.show()
